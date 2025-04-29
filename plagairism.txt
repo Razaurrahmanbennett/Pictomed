@@ -1,0 +1,264 @@
+﻿#include <iostream>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <iomanip>
+#include <chrono>
+#include "document_handler.h"
+#include "text_processor.h"
+#include "similarity_calculator.h"
+#include "string_matcher.h"
+
+void printHelp() {
+    std::cout << "Plagiarism Detection System - Command Line Interface\n";
+    std::cout << "===================================================\n";
+    std::cout << "Usage: ./plagiarism_detector [options] <source_file> <comparison_file>\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  -h, --help                   Show this help message\n";
+    std::cout << "  -v, --verbose                Enable verbose output\n";
+    std::cout << "  -m, --method <method_name>   Specify similarity method (cosine, jaccard, ngram)\n";
+    std::cout << "  -o, --output <output_file>   Write results to output file\n\n";
+    std::cout << "Example:\n";
+    std::cout << "  ./plagiarism_detector -m cosine source.txt comparison.txt\n";
+}
+
+void printProgressBar(int percent) {
+    const int barWidth = 50;
+    std::cout << "[";
+    int pos = barWidth * percent / 100;
+    for (int i = 0; i < barWidth; ++i) {
+        if (i < pos) std::cout << "=";
+        else if (i == pos) std::cout << ">";
+        else std::cout << " ";
+    }
+    std::cout << "] " << percent << " %\r";
+    std::cout.flush();
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        printHelp();
+        return 1;
+    }
+
+    bool verbose = false;
+    std::string method = "all";
+    std::string outputFile = "";
+    std::string sourceFile = "";
+    std::string comparisonFile = "";
+
+    // Parse command line arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            printHelp();
+            return 0;
+        } else if (arg == "-v" || arg == "--verbose") {
+            verbose = true;
+        } else if (arg == "-m" || arg == "--method") {
+            if (i + 1 < argc) {
+                method = argv[++i];
+                if (method != "cosine" && method != "jaccard" && method != "ngram" && method != "all") {
+                    std::cerr << "Error: Unknown method '" << method << "'\n";
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --method requires an argument\n";
+                return 1;
+            }
+        } else if (arg == "-o" || arg == "--output") {
+            if (i + 1 < argc) {
+                outputFile = argv[++i];
+            } else {
+                std::cerr << "Error: --output requires an argument\n";
+                return 1;
+            }
+        } else if (sourceFile.empty()) {
+            sourceFile = arg;
+        } else if (comparisonFile.empty()) {
+            comparisonFile = arg;
+        } else {
+            std::cerr << "Error: Too many arguments\n";
+            return 1;
+        }
+    }
+
+    if (sourceFile.empty() || comparisonFile.empty()) {
+        std::cerr << "Error: Missing required files\n";
+        return 1;
+    }
+
+    std::cout << "Plagiarism Detection System\n";
+    std::cout << "==========================\n\n";
+    
+    std::cout << "Source file: " << sourceFile << "\n";
+    std::cout << "Comparison file: " << comparisonFile << "\n\n";
+    
+    // Start timing
+    auto startTime = std::chrono::high_resolution_clock::now();
+    
+    // Read files
+    DocumentHandler docHandler;
+    
+    std::cout << "Reading files... ";
+    std::string sourceText = docHandler.readFile(sourceFile);
+    std::string comparisonText = docHandler.readFile(comparisonFile);
+    
+    if (sourceText.empty() || comparisonText.empty()) {
+        std::cerr << "Error reading one or both files.\n";
+        return 1;
+    }
+    std::cout << "Done.\n";
+    
+    // Preprocess text
+    TextProcessor processor;
+    
+    std::cout << "Preprocessing source text... ";
+    std::vector<std::string> sourceTokens = processor.tokenize(sourceText);
+    sourceTokens = processor.removeStopWords(sourceTokens);
+    std::cout << "Done.\n";
+    
+    std::cout << "Preprocessing comparison text... ";
+    std::vector<std::string> comparisonTokens = processor.tokenize(comparisonText);
+    comparisonTokens = processor.removeStopWords(comparisonTokens);
+    std::cout << "Done.\n";
+    
+    if (verbose) {
+        std::cout << "\nSource token count: " << sourceTokens.size() << "\n";
+        std::cout << "Comparison token count: " << comparisonTokens.size() << "\n\n";
+    }
+    
+    // Calculate similarity
+    SimilarityCalculator similarityCalc;
+    std::map<std::string, double> similarities;
+    
+    std::cout << "\nCalculating similarity...\n";
+    
+    if (method == "all" || method == "cosine") {
+        std::cout << "Computing Cosine similarity... ";
+        double cosineSim = similarityCalc.calculateCosineSimilarity(sourceTokens, comparisonTokens);
+        similarities["Cosine Similarity"] = cosineSim;
+        std::cout << "Done.\n";
+    }
+    
+    if (method == "all" || method == "jaccard") {
+        std::cout << "Computing Jaccard similarity... ";
+        double jaccardSim = similarityCalc.calculateJaccardSimilarity(sourceTokens, comparisonTokens);
+        similarities["Jaccard Similarity"] = jaccardSim;
+        std::cout << "Done.\n";
+    }
+    
+    if (method == "all" || method == "ngram") {
+        std::cout << "Computing N-gram similarity... ";
+        std::vector<std::string> sourceNgrams = processor.generateNgrams(sourceTokens, 3);
+        std::vector<std::string> comparisonNgrams = processor.generateNgrams(comparisonTokens, 3);
+        double ngramSim = similarityCalc.calculateNgramSimilarity(sourceNgrams, comparisonNgrams);
+        similarities["N-gram Similarity"] = ngramSim;
+        std::cout << "Done.\n";
+    }
+    
+    // Find the highest similarity score
+    std::string bestMethod = "";
+    double highestSimilarity = -1.0;
+    for (const auto& pair : similarities) {
+        if (pair.second > highestSimilarity) {
+            highestSimilarity = pair.second;
+            bestMethod = pair.first;
+        }
+    }
+    
+    // Find matching text segments
+    std::cout << "\nFinding matching text segments... ";
+    StringMatcher matcher;
+    auto matches = matcher.findMatches(sourceText, comparisonText);
+    std::cout << "Done.\n";
+    
+    // End timing
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+    
+    // Display results
+    std::cout << "\n=== RESULTS ===\n\n";
+    
+    // Print similarity scores
+    std::cout << "Similarity Scores:\n";
+    std::cout << "----------------\n";
+    for (const auto& pair : similarities) {
+        std::cout << pair.first << ": " << std::fixed << std::setprecision(2) << (pair.second * 100) << "%";
+        if (pair.first == bestMethod) {
+            std::cout << " (highest)";
+        }
+        std::cout << "\n";
+    }
+    
+    // Determine plagiarism level
+    std::string plagiarismLevel;
+    if (highestSimilarity < 0.3) {
+        plagiarismLevel = "Low";
+    } else if (highestSimilarity < 0.7) {
+        plagiarismLevel = "Moderate";
+    } else {
+        plagiarismLevel = "High";
+    }
+    
+    std::cout << "\nOverall similarity: " << std::fixed << std::setprecision(2) << (highestSimilarity * 100) << "%";
+    std::cout << " (Method: " << bestMethod << ")\n";
+    std::cout << "Plagiarism level: " << plagiarismLevel << "\n";
+    std::cout << "Matching segments found: " << matches.size() << "\n";
+    std::cout << "Analysis completed in " << duration << " ms\n";
+    
+    // Display some matching segments if available
+    if (!matches.empty() && verbose) {
+        std::cout << "\nSample matching segments:\n";
+        std::cout << "------------------------\n";
+        int displayCount = std::min(5, static_cast<int>(matches.size()));
+        for (int i = 0; i < displayCount; ++i) {
+            std::cout << "Match " << (i + 1) << ":\n";
+            std::cout << "  Source: \"" << matches[i].sourceText.substr(0, 100) << (matches[i].sourceText.length() > 100 ? "..." : "") << "\"\n";
+            std::cout << "  Comparison: \"" << matches[i].comparisonText.substr(0, 100) << (matches[i].comparisonText.length() > 100 ? "..." : "") << "\"\n\n";
+        }
+    }
+    
+    // Save report to file if requested
+    if (!outputFile.empty()) {
+        std::ofstream outFile(outputFile);
+        if (outFile.is_open()) {
+            outFile << "Plagiarism Detection Report\n";
+            outFile << "==========================\n\n";
+            outFile << "Source file: " << sourceFile << "\n";
+            outFile << "Comparison file: " << comparisonFile << "\n\n";
+            
+            outFile << "Similarity Scores:\n";
+            outFile << "----------------\n";
+            for (const auto& pair : similarities) {
+                outFile << pair.first << ": " << std::fixed << std::setprecision(2) << (pair.second * 100) << "%";
+                if (pair.first == bestMethod) {
+                    outFile << " (highest)";
+                }
+                outFile << "\n";
+            }
+            
+            outFile << "\nOverall similarity: " << std::fixed << std::setprecision(2) << (highestSimilarity * 100) << "%";
+            outFile << " (Method: " << bestMethod << ")\n";
+            outFile << "Plagiarism level: " << plagiarismLevel << "\n";
+            outFile << "Matching segments found: " << matches.size() << "\n";
+            
+            if (!matches.empty()) {
+                outFile << "\nMatching segments:\n";
+                outFile << "----------------\n";
+                for (size_t i = 0; i < matches.size(); ++i) {
+                    outFile << "Match " << (i + 1) << ":\n";
+                    outFile << "  Source: \"" << matches[i].sourceText << "\"\n";
+                    outFile << "  Comparison: \"" << matches[i].comparisonText << "\"\n\n";
+                }
+            }
+            
+            outFile.close();
+            std::cout << "\nReport saved to " << outputFile << "\n";
+        } else {
+            std::cerr << "Error: Could not open output file for writing\n";
+        }
+    }
+    
+    return 0;
+}
